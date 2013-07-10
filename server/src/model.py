@@ -37,7 +37,7 @@ TIME_FORMAT = '%H:%M:%S'
 def check_list(value):
   if not isinstance(value, (list, tuple, set, frozenset)):
     raise datastore_errors.BadValueError('Expected list or tuple,'
-                                             ' got %r' % (value,))
+                                         ' got %r' % (value,))
 
 
 class _SetFromDictPropertyMixin(object):
@@ -99,9 +99,12 @@ class TextProperty(ndb.TextProperty, _SetFromDictPropertyMixin):
 class BlobProperty(ndb.BlobProperty, _SetFromDictPropertyMixin):
   '''BlobProperty modified.'''
   def _set_from_dict(self, value):
-    if isinstance(value, unicode):
-      value = str(value)
-    return self._do_validate(value)
+    def cast(val):
+      return str(val)
+
+    if self._repeated:
+      return [self._do_validate(cast(v)) for v in value]
+    return self._do_validate(cast(value))
 
 
 class JsonProperty(ndb.JsonProperty, _SetFromDictPropertyMixin):
@@ -111,10 +114,15 @@ class JsonProperty(ndb.JsonProperty, _SetFromDictPropertyMixin):
 class DateProperty(ndb.DateProperty, _SetFromDictPropertyMixin):
   '''DateProperty modified.'''
   def _set_from_dict(self, value):
-    if isinstance(value, basestring):
-      value = datetime.datetime.strptime(value, DATE_FORMAT)
-      value = value.date()
-    return self._do_validate(value)
+    def cast(val):
+      if isinstance(val, basestring):
+        val = datetime.datetime.strptime(val, DATE_FORMAT)
+        val = val.date()
+      return val
+
+      if self._repeated:
+        return [self._do_validate(cast(value)) for v in value]
+    return self._do_validate(cast(value))
 
 
 class DateTimeProperty(ndb.DateTimeProperty, _SetFromDictPropertyMixin):
@@ -128,38 +136,69 @@ class DateTimeProperty(ndb.DateTimeProperty, _SetFromDictPropertyMixin):
 class TimeProperty(ndb.TimeProperty, _SetFromDictPropertyMixin):
   '''TimeProperty modified.'''
   def _set_from_dict(self, value):
-    if isinstance(value, basestring):
-      value = datetime.datetime.strptime(value, TIME_FORMAT)
-      value = value.time()
-    return self._do_validate(value)
+    def cast(val):
+      if isinstance(val, basestring):
+        value = datetime.datetime.strptime(val, TIME_FORMAT)
+        value = val.time()
+      return val
+
+    if self._repeated:
+      return [self._do_validate(cast(v)) for v in value]
+    return self._do_validate(cast(value))
 
 
 class KeyProperty(ndb.KeyProperty, _SetFromDictPropertyMixin):
   '''KeyProperty modified.'''
   def _set_from_dict(self, value):
-    if isinstance(value, basestring):
-      value = ndb.Key(urlsafe=value)
-    elif isinstance(value, dict):
-      if value.get('urlsafe_key', None):
-        value = ndb.Key(urlsafe=value['urlsafe_key'])
-      elif value.get('$$key$$', None):
-        value = ndb.Key(urlsafe=value['$$key$$'])
-    return self._do_validate(value)
+    def cast(val):
+      if isinstance(value, basestring):
+        val = ndb.Key(urlsafe=value)
+      elif isinstance(val, dict):
+        if val.get('urlsafe_key', None):
+          val = ndb.Key(urlsafe=val['urlsafe_key'])
+        elif val.get('$$key$$', None):
+          val = ndb.Key(urlsafe=val['$$key$$'])
+      return val
+
+    if self._repeated:
+      return [self._do_validate(cast(v)) for v in value]
+    return self._do_validate(cast(value))
 
 
 class UserProperty(ndb.UserProperty, _SetFromDictPropertyMixin):
   '''UserProperty modified.'''
   def _set_from_dict(self, value):
-    if isinstance(value, basestring):
-      value = User(value)
-    elif isinstance(value, dict):
-      value = User(value['email'])
-    return self._do_validate(value)
+    def cast(val):
+      if isinstance(val, basestring):
+        value = User(value)
+      elif isinstance(value, dict):
+        value = User(value['email'])
+      return val
+
+    if self._repeated:
+      return [self._do_validate(cast(v)) for v in value]
+    return self._do_validate(cast(value))
+
 
 class ComputedProperty(ndb.ComputedProperty, _SetFromDictPropertyMixin):
   '''ComputedProperty modified.'''
   def _set_from_dict(self, value):
     return None
+
+
+class GeoPtProperty(ndb.GeoPtProperty, _SetFromDictPropertyMixin):
+  '''GeoPtProperty modified.'''
+  def _set_from_dict(self, value):
+    def cast(val):
+      if isinstance(val, (list, tuple, frozenset)):
+        val = (val[0], val[1])
+      elif isinstance(val, dict):
+        val = (val['lat'], val.get('lng', None) or val.get('lon', None))
+      return ndb.GeoPt(*val)
+
+    if self._repeated:
+      return [self._do_validate(cast(v)) for v in value]
+    return self._do_validate(cast(value))
 
 
 class _StructuredSetFromDictMixin(object):
@@ -270,7 +309,7 @@ class Model(ndb.Model):
       prop_value = prop._get_value(self)
       prop_original = prop._original
       if prop._repeated:
-        inner_originals = [] # to hold original entity from each value
+        inner_originals = []  # to hold original entity from each value
         for v_index, value in enumerate(prop_value):
           if not value.urlsafe_key:
             if prop._allow_new:
@@ -403,7 +442,6 @@ class ReferenceProperty(StructuredProperty):
         raise datastore_errors.BadValueError('No display property found.')
     else:
       if not isinstance(self._display, ndb.StringProperty) and \
-          not isinstance(self._display, ndb.TextProperty) and \
           not callable(self._display):
         raise datastore_errors.BadValueError('Display argument is not valid.')
 

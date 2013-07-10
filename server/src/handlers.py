@@ -37,7 +37,8 @@ from .oauth2 import get_service
 
 from .model_handler_mixin import ModelHandlerMixin
 
-__all__ = ['BaseHandler', 'ModelHandlerMixin', 'NoKeyError']
+__all__ = ['BaseHandler', 'ModelHandlerMixin', 'NoKeyError',
+           'UserIdentifierUsedError', 'ConstantHandler']
 logger = logging.getLogger(__name__)
 
 
@@ -100,17 +101,25 @@ class BaseHandler(webapp2.RequestHandler):
   def render_json(self, jsonable):
     '''Render JSON response'''
     self.response.content_type = 'application/json'
-    rv = webapp2_extras.json.encode(jsonable, ensure_ascii=False,
-                                    cls=JSONEncoder)
+    rv = self.encode_json(jsonable)
 
     # Allow JSONP requests
     if self.request.get('callback'):
       rv = self.request.get('callback') + '(' + rv + ')'
     return self.response.write(rv)
 
+  def encode_json(self, jsonable, **kwargs):
+    '''Encode in JSON format.'''
+    return webapp2_extras.json.encode(jsonable, ensure_ascii=False,
+                                      cls=JSONEncoder, **kwargs)
+
   def extract_json(self):
     '''Convert request body in JSON'''
-    return webapp2_extras.json.decode(self.request.body)
+    return self.decode_json(self.request.body)
+
+  def decode_json(self, json_string, **kwargs):
+    '''Decode from JSON format'''
+    return webapp2_extras.json.decode(json_string)
 
   # Jinja2 support
   @webapp2.cached_property
@@ -143,19 +152,14 @@ class BaseHandler(webapp2.RequestHandler):
     '''Gets system user'''
     appengine_user = users.get_current_user()
     user_model = self.auth.store.user_model
-    system_user = user_model.get_by_auth_id(u'google:' + appengine_user.email())
+    system_user = user_model.get_by_auth_id(appengine_user.email())
     if not system_user:
-      ok, system_user = user_model.create_user(
-        u'google:' + appengine_user.email(),
-        user_id=appengine_user.user_id(),
-        nickname=appengine_user.nickname(),
-        email=appengine_user.email(),
-        type=[]
-      )
+      ok, system_user = user_model.create_user(appengine_user.email())
       if ok:
         return system_user
       else:
         raise UserIdentifierUsedError
+    return system_user
 
   def get_namespace(self):
       '''Gets namespace to store data.'''
@@ -246,3 +250,20 @@ class BaseHandler(webapp2.RequestHandler):
   @webapp2.cached_property
   def auth(self):
       return webapp2_extras.auth.get_auth(request=self.request)
+
+
+class ConstantHandler(BaseHandler):
+  '''
+    Handler to serve contants values defined in code source.
+    We assume the following structure to manage constants:
+      CONSTANT = (
+        (CONSTANT_VALUE, CONSTANT_LABEL),
+      )
+    So, the constant should be a sequence of two-element items where the first
+    is the constant value and the second is a label to that value.
+  '''
+  constant = tuple()
+
+  def get(self):
+    '''Returns a JSON format of a constant defined in 'constant' attribute.'''
+    self.render_json([{'label': c[1], 'value': c[0]} for c in self.constant])
