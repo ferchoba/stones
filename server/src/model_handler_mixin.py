@@ -33,6 +33,9 @@ from google.appengine.ext.ndb import Property
 logger = logging.getLogger(__name__)
 
 
+from google.net.proto.ProtocolBuffer import ProtocolBufferDecodeError
+
+
 class Error(Exception):
   '''Base class to errors'''
 
@@ -43,6 +46,17 @@ class NoKeyOrIdError(Error):
 
 class NoEntityError(Error):
   '''Occurs when is imposible to find an entity.'''
+
+
+def get_entity_by_key(key):
+  '''Retrieves an entity by a key.'''
+  try:
+    entity = Key(urlsafe=key).get()
+    if not entity:
+      raise NoEntityError
+    return entity
+  except ProtocolBufferDecodeError, e:
+    raise NoEntityError
 
 
 class ModelHandlerMixin(object):
@@ -109,9 +123,14 @@ class ModelHandlerMixin(object):
     key = kwargs.pop('key', None) or self.request.get('key')
     id = kwargs.get('id', None) or self.request.get('id')
     if key:
-        entities = Key(urlsafe=key).get()
+      try:
+        entities = get_entity_by_key(key)
+      except NoEntityError:
+        return self.abort(404, '%s not found.' % self.model.__class__.__name__)
     elif id:
-        entities = self.model.get_by_id(id)
+      entities = self.model.get_by_id(id)
+      if not entities:
+        return self.abort(404, '%s not found.' % self.model.__class__.__name__)
     else:
         # No key or id. We need to return entities by query filters.
         filters = self.build_filters(kwargs)
@@ -171,12 +190,14 @@ class ModelHandlerMixin(object):
       raise NoKeyOrIdError
 
     if key:
-      entity = Key(urlsafe=key).get()
+      try:
+        entities = get_entity_by_key(key)
+      except NoEntityError:
+        return self.abort(404, '%s not found.' % self.model.__class__.__name__)
     elif id:
-      self.model.get_by_id(id)
-
-    if entity is None:
-      return self.abort(404, '%s not found.' % self.model.__class__.__name__)
+      entities = self.model.get_by_id(id)
+      if not entities:
+        return self.abort(404, '%s not found.' % self.model.__class__.__name__)
 
     entity_json = self.extract_json()
     self.update_model(entity, **entity_json)
