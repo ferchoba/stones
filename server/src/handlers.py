@@ -152,13 +152,18 @@ class BaseHandler(webapp2.RequestHandler):
     '''Gets system user'''
     appengine_user = users.get_current_user()
     user_model = self.auth.store.user_model
-    system_user = user_model.get_by_auth_id(appengine_user.email())
-    if not system_user:
-      ok, system_user = user_model.create_user(appengine_user.email())
-      if ok:
-        return system_user
-      else:
-        raise UserIdentifierUsedError
+    system_user = None
+    if appengine_user:
+      system_user = user_model.get_by_auth_id(appengine_user.email())
+
+      if not system_user:
+        ok, system_user = user_model.create_user(appengine_user.email(),
+                                                 email=appengine_user.email())
+        if ok:
+          return system_user
+        else:
+          raise UserIdentifierUsedError
+
     return system_user
 
   def get_namespace(self):
@@ -195,7 +200,7 @@ class BaseHandler(webapp2.RequestHandler):
   def get_login_url(self, come_back_to='/'):
     '''
       Returns login url.
-      Defaults to login_url value set on class definition.
+      Defaults to appengine login url creation.
     '''
     return users.create_login_url(come_back_to)
 
@@ -216,12 +221,15 @@ class BaseHandler(webapp2.RequestHandler):
     _dispatch = False
     if self.users_allowed:
       if self.user:
-        for type in self.user.type:
-          _dispatch = _dispatch or type in self.users_allowed
-          if _dispatch:
-            break
-        _dispatch = _dispatch or \
-          self.user.get_id() in self.users_allowed
+        try:
+          for type in self.user.type:
+            _dispatch = _dispatch or type in self.users_allowed
+            if _dispatch:
+              break
+          _dispatch = _dispatch or \
+            self.user.get_id() in self.users_allowed
+        except AttributeError:
+          _dispatch = False
     else:
       _dispatch = True
 
