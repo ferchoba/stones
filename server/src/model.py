@@ -50,6 +50,10 @@ class _SetFromDictPropertyMixin(object):
     return self._do_validate(value)
 
 
+class GenericProperty(ndb.GenericProperty, _SetFromDictPropertyMixin):
+  '''GenericProperty modified.'''
+
+
 class StringProperty(ndb.StringProperty, _SetFromDictPropertyMixin):
   '''StringProperty modified.'''
 
@@ -228,6 +232,15 @@ class LocalStructuredProperty(ndb.LocalStructuredProperty,
   '''LocalStructuredProperty modified.'''
 
 
+def get_prop(prop_name, properties):
+  '''Gets a property instance from its formal name (code_name).'''
+  assert isinstance(properties, dict), 'Properties should be a dict.'
+  for prop in properties.itervalues():
+    if prop._code_name == prop_name:
+      return prop
+  logger.warning('%s attribute not found.' % prop_name)
+
+
 class Model(ndb.Model):
   '''New Model "from_dict" capable.'''
   def __unicode__(self):
@@ -271,10 +284,9 @@ class Model(ndb.Model):
   def _populate_from_dict(self, json):
     '''Populates the entity with data from dict.'''
     values = self._initial_values_from_dict(json)
-    values_keys = values.keys()
-    for unused, prop in self._properties.iteritems():
-      if prop._code_name in values_keys:
-        prop._set_value(self, values[prop._code_name])
+    for key, value in values.iteritems():
+      prop = get_prop(key, self._properties)
+      prop._set_value(self, value)
 
   def _pre_put_hook(self):
     '''Determines if any inner ReferenceProperty must be saved after save
@@ -375,6 +387,72 @@ class Model(ndb.Model):
       _to_dict['$$key$$'] = self.key.urlsafe()
     return _to_dict
 
+
+class Expando(ndb.Expando, Model):
+  '''Stones Expando version. Adds to Expando the new functionality.'''
+  def __setattr__(self, name, value):
+    '''Extracted from google.appengine.ext.ndb.model:3496 v:1.8.3.
+    Overrided to fix properties references.'''
+    if (name.startswith('_') or
+        isinstance(getattr(self.__class__, name, None),
+                   (ndb.Property, property))):
+      return super(Expando, self).__setattr__(name, value)
+    # TODO: Refactor this to share code with _fake_property().
+    self._clone_properties()
+    if isinstance(value, Model):
+      prop = StructuredProperty(Model, name)
+    elif isinstance(value, dict):
+      prop = StructuredProperty(Expando, name)
+    else:
+      repeated = isinstance(value, list)
+      indexed = self._default_indexed
+      # TODO: What if it's a list of Model instances?
+      prop = GenericProperty(name, repeated=repeated, indexed=indexed)
+    prop._code_name = name
+    self._properties[name] = prop
+    prop._set_value(self, value)
+
+  @classmethod
+  def _initial_values_from_dict(cls, value):
+    '''Extract model attribute values from dict.'''
+    if not isinstance(value, dict):
+      raise datastore_errors.BadValueError('Expected dict, got %r.'
+                                           % (value,))
+
+    value.pop('$$key$$', None)
+    value.pop('$$id$$', None)
+    props_names = value.keys()
+    props_code_names = {}
+    for prop_key, prop in cls._properties.iteritems():
+      props_code_names[prop._code_name] = prop_key
+    initial_values = {}
+
+    for key in value.iterkeys():
+      _value = value[key]
+      if key in props_code_names:
+        prop = cls._properties[props_code_names[key]]
+        if not isinstance(prop, ndb.ComputedProperty):
+          if not _value is None:
+            has_set_from_dict = hasattr(prop, '_set_from_dict')
+            if not has_set_from_dict is None:
+              initial_values[key] = prop._set_from_dict(_value)
+      else:
+        repeated = isinstance(value[key], list)
+        prop = GenericProperty(key, repeated=repeated)
+        initial_values[key] = prop._set_from_dict(_value)
+
+    return initial_values
+
+  def _populate_from_dict(self, json):
+    '''Populates the entity with data from dict.'''
+    values = self._initial_values_from_dict(json)
+    props_names = [p._code_name for p in self._properties.itervalues()]
+    for key, value in values.iteritems():
+      if key in props_names:
+        prop = get_prop(key, self._properties)
+        prop._set_value(self, value)
+      else:
+        setattr(self, key, value)
 
 class _ReferenceModel(Model):
   urlsafe_key = StringProperty('k')
@@ -545,7 +623,7 @@ class ReferenceProperty(StructuredProperty):
 
 Key = ndb.Key
 
-__all__ = ['Model', 'Key', 'datastore_errors', '_ReferenceModel']
+__all__ = ['Model', 'Key', 'datastore_errors', '_ReferenceModel', 'Expando']
 for _name, _object in globals().items():
   if ((_name.endswith('Property') and issubclass(_object, ndb.Property)) or
       (_name.endswith('Error') and issubclass(_object, Exception))):

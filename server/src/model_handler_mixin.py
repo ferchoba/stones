@@ -191,11 +191,11 @@ class ModelHandlerMixin(object):
 
     if key:
       try:
-        entities = get_entity_by_key(key)
+        entity = get_entity_by_key(key)
       except NoEntityError:
         return self.abort(404, '%s not found.' % self.model.__class__.__name__)
     elif id:
-      entities = self.model.get_by_id(id)
+      entity = self.model.get_by_id(id)
       if not entities:
         return self.abort(404, '%s not found.' % self.model.__class__.__name__)
 

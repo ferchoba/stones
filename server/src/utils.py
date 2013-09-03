@@ -88,7 +88,12 @@ class JSONEncoder(json.JSONEncoder):
     elif isinstance(obj, LazyProxy):
       return unicode(obj)
     elif isinstance(obj, ndb.Model):
-      return obj.to_dict()
+      our_dict = obj.to_dict()
+      if not '$$key$$' in our_dict:
+        our_dict['$$key$$'] = obj.key.urlsafe()
+      if not '$$id$$' in our_dict:
+        our_dict['$$id$$'] = obj.key.id()
+      return our_dict
     elif isinstance(obj, model.Key):
       return obj.urlsafe()
     elif isinstance(obj, google_users.User):
