@@ -38,8 +38,10 @@ from .oauth2 import get_service
 from .model_handler_mixin import ModelHandlerMixin
 
 __all__ = ['BaseHandler', 'ModelHandlerMixin', 'NoKeyError',
-           'UserIdentifierUsedError', 'ConstantHandler']
+           'UserIdentifierUsedError', 'ConstantHandler', 'tasklet', 'Return']
 logger = logging.getLogger(__name__)
+tasklet = ndb.tasklet
+Return = ndb.Return
 
 
 class Error(Exception):
@@ -98,10 +100,10 @@ class BaseHandler(webapp2.RequestHandler):
                                  cls=JSONEncoder)
     )
 
-  def render_json(self, jsonable):
+  def render_json(self, jsonable, **kwargs):
     '''Render JSON response'''
     self.response.content_type = 'application/json'
-    rv = self.encode_json(jsonable)
+    rv = self.encode_json(jsonable, **kwargs)
 
     # Allow JSONP requests
     if self.request.get('callback'):
@@ -133,7 +135,11 @@ class BaseHandler(webapp2.RequestHandler):
       Assumes an attribute named 'come_back_to' where you can set redirection
       target url.
     '''
-    return users.create_logout_url(come_back_to)
+    try:
+      logout_url = self.uri_for('logout') + '?come_back_to=%s' % come_back_to
+    except KeyError:
+      logout_url = users.create_logout_url(come_back_to)
+    return logout_url
 
   def render_response(self, _template, **_context):
     '''Renders a template and writes the result to the response.'''
@@ -153,16 +159,17 @@ class BaseHandler(webapp2.RequestHandler):
     appengine_user = users.get_current_user()
     user_model = self.auth.store.user_model
     system_user = None
-    if appengine_user:
-      system_user = user_model.get_by_auth_id(appengine_user.email())
 
+    if appengine_user:
+      auth_id = appengine_user.email()
+      system_user = user_model.get_by_auth_id(auth_id)
       if not system_user:
-        ok, system_user = user_model.create_user(appengine_user.email(),
-                                                 email=appengine_user.email())
-        if ok:
-          return system_user
-        else:
-          raise UserIdentifierUsedError
+        auth_id = u'google:' + auth_id
+        system_user = user_model.get_by_auth_id(auth_id)
+    else:
+      system_user = self.auth.get_user_by_session()
+      if system_user:
+        system_user = user_model.get_by_id(system_user['user_id'])
 
     return system_user
 
@@ -202,7 +209,11 @@ class BaseHandler(webapp2.RequestHandler):
       Returns login url.
       Defaults to appengine login url creation.
     '''
-    return users.create_login_url(come_back_to)
+    try:
+      login_url = self.uri_for('login') + '?come_back_to=%s' % come_back_to
+    except KeyError:
+      login_url = users.create_login_url(come_back_to)
+    return login_url
 
   @ndb.toplevel
   def dispatch(self):
@@ -248,7 +259,7 @@ class BaseHandler(webapp2.RequestHandler):
         self.request.route_kwargs
       )
       redirect_to = self.get_login_url(come_back_to=come_back_to)
-      self.redirect(redirect_to + '?come_back_to=' + come_back_to)
+      self.redirect(redirect_to)
 
   @webapp2.cached_property
   def session(self):

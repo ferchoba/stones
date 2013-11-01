@@ -169,6 +169,28 @@ class KeyProperty(ndb.KeyProperty, _SetFromDictPropertyMixin):
     return self._do_validate(cast(value))
 
 
+class BlobKeyProperty(ndb.BlobKeyProperty, _SetFromDictPropertyMixin):
+  '''BlobKeyProperty modifies.'''
+  # TODO: Check if value in _set_from_dict is base64encoded file and find a way
+  #       to convert it in BlobStore.
+
+  # def _set_from_dict(self, value):
+  #   def cast(val):
+  #     if isinstance(value, basestring):
+  #       if value
+  #       val = ndb.Key(urlsafe=value)
+  #     elif isinstance(val, dict):
+  #       if val.get('urlsafe_key', None):
+  #         val = ndb.Key(urlsafe=val['urlsafe_key'])
+  #       elif val.get('$$key$$', None):
+  #         val = ndb.Key(urlsafe=val['$$key$$'])
+  #     return val
+
+  #   if self._repeated:
+  #     return [self._do_validate(cast(v)) for v in value]
+  #   return self._do_validate(cast(value))
+
+
 class UserProperty(ndb.UserProperty, _SetFromDictPropertyMixin):
   '''UserProperty modified.'''
   def _set_from_dict(self, value):
@@ -466,13 +488,18 @@ class ReferenceProperty(StructuredProperty):
                allow_new=True, **kwds):
     '''Constructor.
     Args:
-      modelclass: Entity model class.
+      modelclass: Entity model class. If no modelclass is provided, we assume
+        that modelclass is the entity model class itself.
       display: property or function which returns description for the entity.
         If display is a property, it should be StringProperty.
         If display is a function, it's going to receive the entity itself as
         unique argument.
         If no display is provided, we try to get a 'display' property inside
         modelclass.
+      is_child: If True, we set the parent entity of the new subentity pointing
+        to main entity; else, no parent is set. If True, allow_new is set to
+        True.
+      allow_new: If True, we allow the creation of new entities.
 
     E. g.:
       class MyReferencedModel(Model):
@@ -506,7 +533,7 @@ class ReferenceProperty(StructuredProperty):
     if self._repeated:
       self._original = []
     self._is_child = is_child
-    self._allow_new = allow_new
+    self._allow_new = allow_new or is_child
 
   def _fix_up(self, cls, code_name):
     super(ReferenceProperty, self)._fix_up(cls, code_name)

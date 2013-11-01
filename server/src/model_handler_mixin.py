@@ -108,6 +108,10 @@ class ModelHandlerMixin(object):
       rv.append(order)
     return rv
 
+  def create_query(self, filters=[], order=[], kwargs={}):
+    '''Creates the query to retrieve entities.'''
+    return self.model.query(*filters).order(*order)
+
   def get(self, **kwargs):
     '''GET verb.
     Returns a list of entities, even if the result is a single entity.
@@ -133,9 +137,10 @@ class ModelHandlerMixin(object):
         return self.abort(404, '%s not found.' % self.model.__class__.__name__)
     else:
         # No key or id. We need to return entities by query filters.
+        kwargs.update(self.request.params)
         filters = self.build_filters(kwargs)
         order = self.build_order()
-        qry = self.model.query(*filters).order(*order)
+        qry = self.create_query(filters, order, kwargs)
         entities = get_entities(qry).get_result()
 
     entities = self._post_get_hook(entities)

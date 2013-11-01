@@ -20,6 +20,9 @@
 
 import datetime
 import logging
+import base64
+import random
+import string
 try:
   import simplejson as json
 except ImportError:
@@ -27,7 +30,10 @@ except ImportError:
 
 import webapp2
 from google.appengine.ext import ndb
+from google.appengine.ext import blobstore
+from google.appengine.api import files
 from google.appengine.api import users as google_users
+from google.appengine.api import images
 from babel.support import LazyProxy
 import model
 
@@ -38,7 +44,7 @@ from google.appengine.datastore import datastore_stub_util
 
 logger = logging.getLogger(__name__)
 __all__ = ['JSONEncoder', 'clear_id', 'BaseTestCase', 'get_constant_display',
-           'get_constants_choices']
+           'get_constants_choices', 'resize_image']
 
 
 def get_constant_display(constant, constants_group):
@@ -89,9 +95,9 @@ class JSONEncoder(json.JSONEncoder):
       return unicode(obj)
     elif isinstance(obj, ndb.Model):
       our_dict = obj.to_dict()
-      if not '$$key$$' in our_dict:
+      if not '$$key$$' in our_dict and obj.key:
         our_dict['$$key$$'] = obj.key.urlsafe()
-      if not '$$id$$' in our_dict:
+      if not '$$id$$' in our_dict and obj.key:
         our_dict['$$id$$'] = obj.key.id()
       return our_dict
     elif isinstance(obj, model.Key):
@@ -104,6 +110,31 @@ class JSONEncoder(json.JSONEncoder):
       }
     else:
       return json.JSONEncoder.default(self, obj)
+
+
+def resize_image(b64encoded_image, width=0, height=0):
+  '''Resize an image.
+
+    :param b64encoded_image:
+    Base64 image representation.
+
+    :returns:
+    base64 encoded string representing the image.'''
+  # if we deal with unprocessed base64.
+  if 'data:' in b64encoded_image:
+    parts = b64encoded_image.split(',')
+    mimetype = parts[0].split(';')[0].split(':')[1]
+    content = parts[1]
+  else:
+    mimetype = 'image/png'
+    content = b64encoded_image
+
+  logger.debug(mimetype)
+  img = base64.decodestring(content)
+  img = images.resize(image_data=img, height=height, width=width)
+  img = base64.encodestring(img)
+  img = ''.join(['data:', mimetype, ';base64,', img.encode('utf-8')])
+  return img
 
 
 class BaseTestCase(unittest.TestCase):
