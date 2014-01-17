@@ -281,7 +281,12 @@ class Model(ndb.Model):
                                            % (value,))
 
     props_names = value.keys()
-    initial_values = {}
+    parent = None
+    if 'parent' in props_names:
+      parent = ndb.Key(urlsafe=value['parent'])
+    initial_values = {
+      'parent': parent,
+    }
     for prop in cls._properties.itervalues():
       name = prop._code_name
       if name in props_names and not isinstance(prop, ndb.ComputedProperty):
@@ -306,6 +311,7 @@ class Model(ndb.Model):
   def _populate_from_dict(self, json):
     '''Populates the entity with data from dict.'''
     values = self._initial_values_from_dict(json)
+    parent = values.pop('parent', None)
     for key, value in values.iteritems():
       prop = get_prop(key, self._properties)
       prop._set_value(self, value)

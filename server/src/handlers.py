@@ -65,7 +65,6 @@ class BaseHandler(webapp2.RequestHandler):
   # Empty array means all users: authorized and unauthorized
   # You can restrict by user type or user_id
   # TODO: We need dynamic users groups?
-  # users_allowed = []
   users_allowed = []
 
   # Session backend used to mamnage sessions.
@@ -285,4 +284,4 @@ class ConstantHandler(BaseHandler):
 
   def get(self):
     '''Returns a JSON format of a constant defined in 'constant' attribute.'''
-    self.render_json([{'label': c[1], 'value': c[0]} for c in self.constant])
+    self.render_json([{'label': c[1], 'value': c[0]} for c in self.constant if c[1]])

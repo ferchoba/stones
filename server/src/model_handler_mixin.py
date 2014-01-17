@@ -28,6 +28,7 @@ from google.appengine.ext import ndb
 from .utils import *
 
 from google.appengine.ext.ndb import Property
+from google.appengine.datastore.datastore_query import PropertyOrder
 
 
 logger = logging.getLogger(__name__)
@@ -102,15 +103,40 @@ class ModelHandlerMixin(object):
     '''Builds entities sorting.'''
     rv = []
     for order in self.ordering:
-      if not isinstance(order, Property):
+      if not isinstance(order, Property) and not isinstance(order, PropertyOrder):
         continue
-
       rv.append(order)
     return rv
 
   def create_query(self, filters=[], order=[], kwargs={}):
     '''Creates the query to retrieve entities.'''
-    return self.model.query(*filters).order(*order)
+    if 'parent' in kwargs:
+      parent = ndb.Key(urlsafe=kwargs['parent'])
+      query = self.model.query(ancestor=parent)
+    else:
+      query = self.model.query()
+
+    query = query.filter(*filters)
+    query = query.order(*order)
+    return query
+
+  def limit(self, limit=None):
+    '''Sets the maximum number of results retrieved by a query (GET).
+
+    :param limit:
+      Limit found in request params. "l" is a reserved query parameter to
+      restrict the number of results.
+    :type limit:
+      integer
+    '''
+    if limit is None:
+      return None
+
+    try:
+      limit = int(limit)
+    except ValueError:
+      raise ValueError('Limit should be an integer. Found %s' % limit)
+    return limit
 
   def get(self, **kwargs):
     '''GET verb.
@@ -119,8 +145,8 @@ class ModelHandlerMixin(object):
     We assume 'key' or 'id' for identify one entity through url param.'''
 
     @ndb.tasklet
-    def get_entities(qry):
-      _entities = yield qry.fetch_async()
+    def get_entities(qry, limit=None):
+      _entities = yield qry.fetch_async(limit)
       raise ndb.Return(_entities)
 
     self._pre_get_hook()
@@ -141,7 +167,10 @@ class ModelHandlerMixin(object):
         filters = self.build_filters(kwargs)
         order = self.build_order()
         qry = self.create_query(filters, order, kwargs)
-        entities = get_entities(qry).get_result()
+        # "l" is a reserved query parameter to limit how many results should be
+        # retrieved
+        limit = self.limit(kwargs.get('l', None))
+        entities = get_entities(qry, limit).get_result()
 
     entities = self._post_get_hook(entities)
 
@@ -152,7 +181,7 @@ class ModelHandlerMixin(object):
 
   def _post_post_hook(self, entity):
     '''To run after POST.
-    entity: recenty entity created.'''
+    entity: recently entity created.'''
 
   def create_model(self, **model_args):
     '''Create a new instance of model class.
@@ -188,8 +217,8 @@ class ModelHandlerMixin(object):
     '''PUT verb.
     Modifies an entity with JSON info provided.'''
     self._pre_put_hook()
-    key = kwargs.pop('key', None) 
-    id = self.request.get('id', None) 
+    key = kwargs.pop('key', None)
+    id = self.request.get('id', None)
 
     if not key and not id:
       raise NoKeyOrIdError
@@ -229,8 +258,8 @@ class ModelHandlerMixin(object):
     '''DELETE verb.
     Deletes an entity.'''
     self._pre_delete_hook()
-    key = kwargs.pop('key', None) 
-    id = self.request.get('id', None) 
+    key = kwargs.pop('key', None)
+    id = self.request.get('id', None)
 
     if not key and not id:
       raise NoKeyOrIdError

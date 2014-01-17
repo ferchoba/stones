@@ -19,6 +19,7 @@ class User(Webapp2_user, stones.Expando):
   # Hashed password. Not required because third party authentication
   # doesn't use password.
   password = stones.StringProperty()
+  type = stones.StringProperty(repeated=True)
 
   def _populate_from_dict(self, json):
     '''Populates the entity with data from dict.'''
