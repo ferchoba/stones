@@ -19,9 +19,14 @@
 # Copyright 2013, Carlos León <carlos.eduardo.leon.franco@gmail.com>
 
 
+import logging
 import httplib2
 import urllib
 import urlparse
+import random
+import string
+
+logger = logging.getLogger(__name__)
 
 try:
   from urlparse import parse_qs, parse_qsl
@@ -34,8 +39,7 @@ except ImportError:
   import json
 
 __all__ = ['OAuth2Service', 'OAuth2ServicesError', 'OAuth2ClientError',
-           'OAuth2Client', 'OAuth2Token', 'GoogleOAuth2Service', 'OAuth2Error',
-           'get_service', 'FacebookOAuth2Service']
+           'OAuth2Client', 'OAuth2Token', 'OAuth2Error', 'get_service']
 
 
 class OAuth2Error(Exception):
@@ -313,11 +317,65 @@ class FacebookOAuth2Service(OAuth2Service):
     return response_args
 
 
+class LinkedInOAuth2Service(OAuth2Service):
+  '''LinkedIn OAuth2 specific service'''
+  def __init__(self, client_id, client_secret, redirect_uri, **kwargs):
+    defaults = {
+      'client_id': client_id,
+      'client_secret': client_secret,
+      'redirect_uri': redirect_uri,
+      'request_token_uri': 'https://www.linkedin.com/uas/oauth2/authorization',
+      'access_token_uri': 'https://www.linkedin.com/uas/oauth2/accessToken',
+    }
+    defaults.update(kwargs)
+    super(LinkedInOAuth2Service, self).__init__(**defaults)
+
+  def get_authorization_url(self, **kwargs):
+    if not 'client_id' in kwargs:
+      kwargs['client_id'] = self.client_id
+    if not 'state' in kwargs:
+      kwargs['state'] = ''.join(
+        random.sample(string.ascii_letters + string.digits, 32))
+    return super(LinkedInOAuth2Service, self).get_authorization_url(**kwargs)
+
+  def make_request(self, base_uri, method='GET', headers=None, params=None,
+                   body=None, token_param='access_token'):
+    _headers = {}
+    if headers:
+      _headers.update(headers)
+    _params = {}
+    return self.client.request(base_uri, self.token.access_token, method,
+                               body, _headers, params, token_param)
+
+
+  def get_user_info(self, token=None):
+    if token is None:
+      token = self.token
+    else:
+      self.token = token
+
+    base_uri = 'https://api.linkedin.com/v1/people/'
+    params = {'format': 'json'}
+    response, content = self.make_request(base_uri + '~:(email-address)',
+                                          token_param='oauth2_access_token',
+                                          params=params)
+
+    if not response.status == 200:
+        raise OAuth2ServicesError(content)
+    response_args = json.loads(content)
+    email = response_args.pop('emailAddress', None)
+    if email:
+      response_args['email'] = email
+    return response_args
+
+
 def get_service(service_name):
   '''Returns proper service class linked with service_name'''
   if service_name == 'google':
     return GoogleOAuth2Service
-  if service_name == 'facebook':
+  elif service_name == 'facebook':
     return FacebookOAuth2Service
+  elif service_name == 'linkedin':
+    return LinkedInOAuth2Service
   else:
-    raise Exception('No %s service supported.' % service_name)
+    raise OAuth2ServicesError('No %s service supported.' % service_name)

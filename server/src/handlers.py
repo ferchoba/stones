@@ -155,19 +155,18 @@ class BaseHandler(webapp2.RequestHandler):
   @webapp2.cached_property
   def user(self):
     '''Gets system user'''
-    appengine_user = users.get_current_user()
+    system_user = self.auth.get_user_by_session()
     user_model = self.auth.store.user_model
-    system_user = None
+    if not system_user:
+      appengine_user = users.get_current_user()
 
-    if appengine_user:
-      auth_id = appengine_user.email()
-      system_user = user_model.get_by_auth_id(auth_id)
-      if not system_user:
-        auth_id = u'google:' + auth_id
+      if appengine_user:
+        auth_id = appengine_user.email()
         system_user = user_model.get_by_auth_id(auth_id)
+        if not system_user:
+          auth_id = u'google:' + auth_id
+          system_user = user_model.get_by_auth_id(auth_id)
     else:
-      system_user = self.auth.get_user_by_session()
-      if system_user:
         system_user = user_model.get_by_id(system_user['user_id'])
 
     return system_user
