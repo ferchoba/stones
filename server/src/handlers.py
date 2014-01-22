@@ -142,12 +142,15 @@ class BaseHandler(webapp2.RequestHandler):
 
   def render_response(self, _template, **_context):
     '''Renders a template and writes the result to the response.'''
-    # default context to render response
+    version_config = self.app.config.load_config('lib_version')
     context = {
       'dev': self.app.debug,
+      'user_json': self.encode_json(self.user),
       'user': self.user,
       'logout_url': self.get_logout_url(),
     }
+    if (version_config):
+      context.update(version_config)
     context.update(_context)
     rv = self.jinja2.render_template(_template, **context)
     self.response.write(rv)

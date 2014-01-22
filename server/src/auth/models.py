@@ -9,10 +9,11 @@ import stones
 
 
 logger = logging.getLogger(__name__)
+__all__ = ['BaseUser']
 
 
-class User(Webapp2_user, stones.Expando):
-  '''User model.'''
+class BaseUser(Webapp2_user, stones.Expando):
+  '''Base User model.'''
   created = stones.DateTimeProperty(auto_now_add=True)
   updated = stones.DateTimeProperty(auto_now=True)
   confirmed = stones.DateTimeProperty()
@@ -23,6 +24,18 @@ class User(Webapp2_user, stones.Expando):
   password = stones.StringProperty()
   type = stones.StringProperty(repeated=True)
 
+  @classmethod
+  def get_user_types(cls):
+    return [
+      ('u', ''),
+      ('admin', 'admin'),
+      ('superhero', 'superhero'),
+    ]
+
+  def __unicode__(self):
+    '''String representation for user model.'''
+    return self.auth_ids[0].split(':')[-1]
+
   @property
   def is_confirmed(self):
     return not self.confirmed is None
@@ -30,9 +43,26 @@ class User(Webapp2_user, stones.Expando):
   def _populate_from_dict(self, json):
     '''Populates the entity with data from dict.'''
     json.pop('password', None)
-    super(User, self)._populate_from_dict(json)
+    super(BaseUser, self)._populate_from_dict(json)
 
   def set_password(self, password):
     '''Sets user password.'''
     hashed = security.generate_password_hash(password, length=12)
     self.password = hashed
+
+  def to_dict(self):
+    rv = super(BaseUser, self).to_dict()
+    rv.pop('password', None)
+    rv['is_confirmed'] = self.is_confirmed
+    rv['source'] = self.auth_ids[0].split(':')[0]
+    return rv
+
+  @classmethod
+  def create_user(cls, auth_id, unique_properties=None, **user_values):
+    '''Creates one user.'''
+    _uniques = ['email']
+    if isinstance(unique_properties, list) or isinstance(unique_properties, tuple):
+      _uniques += list(unique_properties)
+    return super(BaseUser, cls).create_user(auth_id, _uniques, **user_values)
+
+

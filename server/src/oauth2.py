@@ -221,14 +221,16 @@ class OAuth2Service(object):
   access_token_uri = ''
   redirect_uri = ''
   scope = []
+  display = ''
 
   def __init__(self, client_id, client_secret, request_token_uri,
-               access_token_uri, redirect_uri, scope):
+               access_token_uri, redirect_uri, scope, display=''):
     self.client_id = client_id
     self.client_secret = client_secret
     self.request_token_uri = request_token_uri
     self.access_token_uri = access_token_uri
     self.redirect_uri = redirect_uri
+    self.display = display
 
     if isinstance(scope, basestring):
       self.scope = scope.split(' ')
@@ -245,10 +247,17 @@ class OAuth2Service(object):
     self.token = OAuth2Token()
 
   def get_authorization_url(self, **kwargs):
-    if kwargs.get('response_type', None) is None:
+    if not 'response_type' in kwargs:
       kwargs['response_type'] = 'code'
-    if kwargs.get('scope', None) is None:
+    if not 'scope' in kwargs:
       kwargs['scope'] = ' '.join(self.scope)
+    if not 'state' in kwargs:
+      kwargs['state'] = ''.join(
+        random.sample(string.ascii_letters + string.digits, 32))
+
+    come_back_to = kwargs.pop('come_back_to', None)
+    if come_back_to:
+      kwargs['state'] += '|%s' % come_back_to
     return self.client.authorization_url(**kwargs)
 
   def get_access_token(self, code, **kwargs):
@@ -333,9 +342,6 @@ class LinkedInOAuth2Service(OAuth2Service):
   def get_authorization_url(self, **kwargs):
     if not 'client_id' in kwargs:
       kwargs['client_id'] = self.client_id
-    if not 'state' in kwargs:
-      kwargs['state'] = ''.join(
-        random.sample(string.ascii_letters + string.digits, 32))
     return super(LinkedInOAuth2Service, self).get_authorization_url(**kwargs)
 
   def make_request(self, base_uri, method='GET', headers=None, params=None,
