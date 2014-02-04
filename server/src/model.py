@@ -142,8 +142,8 @@ class TimeProperty(ndb.TimeProperty, _SetFromDictPropertyMixin):
   def _set_from_dict(self, value):
     def cast(val):
       if isinstance(val, basestring):
-        value = datetime.datetime.strptime(val, TIME_FORMAT)
-        value = val.time()
+        val = datetime.datetime.strptime(val, TIME_FORMAT)
+        val = val.time()
       return val
 
     if self._repeated:
@@ -155,8 +155,8 @@ class KeyProperty(ndb.KeyProperty, _SetFromDictPropertyMixin):
   '''KeyProperty modified.'''
   def _set_from_dict(self, value):
     def cast(val):
-      if isinstance(value, basestring):
-        val = ndb.Key(urlsafe=value)
+      if isinstance(val, basestring):
+        val = ndb.Key(urlsafe=val)
       elif isinstance(val, dict):
         if val.get('urlsafe_key', None):
           val = ndb.Key(urlsafe=val['urlsafe_key'])
@@ -176,9 +176,9 @@ class BlobKeyProperty(ndb.BlobKeyProperty, _SetFromDictPropertyMixin):
 
   # def _set_from_dict(self, value):
   #   def cast(val):
-  #     if isinstance(value, basestring):
-  #       if value
-  #       val = ndb.Key(urlsafe=value)
+  #     if isinstance(val, basestring):
+  #       if val
+  #       val = ndb.Key(urlsafe=val)
   #     elif isinstance(val, dict):
   #       if val.get('urlsafe_key', None):
   #         val = ndb.Key(urlsafe=val['urlsafe_key'])
@@ -196,9 +196,9 @@ class UserProperty(ndb.UserProperty, _SetFromDictPropertyMixin):
   def _set_from_dict(self, value):
     def cast(val):
       if isinstance(val, basestring):
-        value = User(value)
-      elif isinstance(value, dict):
-        value = User(value['email'])
+        val = User(val)
+      elif isinstance(val, dict):
+        val = User(val['email'])
       return val
 
     if self._repeated:

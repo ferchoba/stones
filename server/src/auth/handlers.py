@@ -20,7 +20,9 @@ __all__ = ['AuthError', 'ProviderConfNotFoundError', 'BaseWelcomeHandler',
            'BaseUserAuthProvidersHandler', 'BaseMakeSuperHeroHandler',
            'BaseLogoutHandler', 'BaseSignupHandler',
            'BaseAccountVerificationEmailHandler',
-           'BaseAccountVerificationHandler', 'BaseLoginHandler']
+           'BaseAccountVerificationHandler', 'BaseLoginHandler',
+           'BasePasswordReset1Handler', 'BasePasswordResetSendHandler',
+           'BasePasswordResetEmailHandler', 'BasePasswordReset2Handler']
 
 AUTH_CONFIG = {
   'providers': {},
@@ -31,6 +33,11 @@ AUTH_CONFIG = {
     'welcome_text': 'auth/welcome_email.txt',
     'welcome_html': 'auth/welcome_email.html',
     'verify_account': 'auth/verify_account.html',
+    'password_reset_1': 'auth/password_reset_1.html',
+    'password_reset_send': 'auth/password_reset_send.html',
+    'password_reset_2': 'auth/password_reset_2.html',
+    'password_reset_text': 'auth/password_reset_email.txt',
+    'password_reset_html': 'auth/password_reset_email.html',
   },
   'email_sender': 'foo@bar.com',
 }
@@ -114,7 +121,7 @@ class BaseOAuth2CallbackHandler(OAuth2Conf):
       return self.redirect_to('oauth2.begin', provider=provider)
     state = self.request.get('state', None)
     come_back_to = ''
-    if state:
+    if state and '|' in state:
       come_back_to = state.split('|')[-1]
 
     oauth2_conf = self.get_provider_conf(provider)
@@ -135,9 +142,6 @@ class BaseOAuth2CallbackHandler(OAuth2Conf):
       if ok:
         user.confirmed = datetime.datetime.now()
         user.put_async()
-        user = user_model.get_by_auth_id(':'.join(
-          [provider, user_info['email']]))
-        logger.debug(user)
         user = self.auth.store.user_to_dict(user)
         self.auth.set_session(user)
         if come_back_to:
@@ -270,6 +274,162 @@ class BaseAccountVerificationHandler(WebAppBaseHandler):
     if valid_token:
       password = self.request.get('password')
       confirm = self.request.get('confirm')
+      first_name = self.request.get('first_name')
+      last_name = self.request.get('last_name')
+
+      if not password:
+        # TODO: Localize error messages
+        context['errors']['password'] = u'Contraseña no válida'
+      if not confirm:
+        # TODO: Localize error messages
+        context['errors']['confirm'] = u'Confirmación de Contraseña no válida'
+      if password and confirm and password != confirm:
+        # TODO: Localize error messages
+        context['errors']['confirm'] = u'Contraseña y Confirmación no coinciden'
+      if not first_name:
+        # TODO: Localize error messages
+        context['errors']['first_name'] = u'Tu nombre es obligatorio'
+      if not last_name:
+        # TODO: Localize error messages
+        context['errors']['last_name'] = u'Tu apellido es obligatorio'
+
+      if context['errors']:
+        return self.render_response(self._tpl_name, **context)
+
+      user = self.auth.store.user_model.get_by_id(user_id)
+      user.set_password(password)
+      user.confirmed = datetime.datetime.now()
+      user.first_name = first_name
+      user.last_name = last_name
+      user.put_async()
+      user.delete_signup_token(user_id, signup_token)
+      user = self.auth.store.user_to_dict(user)
+      self.auth.set_session(user)
+      return self.redirect_to('home')
+    else:
+      self.abort(403, 'Invalid Token.')
+
+
+class BasePasswordReset1Handler(WebAppBaseHandler):
+  '''Handler to begin password reset process.'''
+  tpl_key = 'password_reset_1'
+
+  def get(self):
+    context = {
+      'pwd_reset_url': self.uri_for('password.reset.1'),
+      'angular_app': self.angular_app,
+      'page_title': self.page_title,
+      'errors': {},
+    }
+    return self.render_response(self._tpl_name, **context)
+
+  def post(self):
+    errors = {}
+    user_email = self.request.get('user_email')
+    if not user_email:
+      # TODO: Localize error messages
+      errors['email'] = u'Contraseña no válida'
+    else:
+      user = self.auth.store.user_model.query(
+        stones.GenericProperty('email') == user_email).get()
+      if not user:
+        # TODO: Localize error messages
+        errors['email'] = u'Usuario no existente'
+
+    if errors:
+      context = {
+        'pwd_reset_url': self.uri_for('password.reset.1'),
+        'angular_app': self.angular_app,
+        'page_title': self.page_title,
+        'errors': errors,
+      }
+      return self.render_response(self._tpl_name, **context)
+    else:
+      user_id = user.get_id()
+      pwd_reset_token = self.auth.store.create_pwd_reset_token(user_id)
+      taskqueue.add(
+        url=self.uri_for('send.password.reset', user_id=user_id),
+        params={'pwd_reset_token': pwd_reset_token},
+        method='POST'
+      )
+      return self.redirect_to('password.reset.send')
+
+
+class BasePasswordResetSendHandler(WebAppBaseHandler):
+  '''Handler to notify password reset email was send.'''
+  tpl_key = 'password_reset_send'
+
+  def get(self):
+    context = {
+      'angular_app': self.angular_app,
+      'page_title': self.page_title,
+      'errors': {},
+    }
+    return self.render_response(self._tpl_name, **context)
+
+
+class BasePasswordResetEmailHandler(stones.BaseHandler):
+  '''Handler to send password reset email.'''
+  def post(self, user_id=None):
+    config = self.app.config.load_config('stones.auth',
+      default_values=AUTH_CONFIG,
+      required_keys=['email_sender', 'templates'])
+
+    pwd_reset_token = self.request.get('pwd_reset_token')
+    user = self.auth.store.user_model.get_by_id(int(user_id))
+
+    context = {
+      'pwd_reset_url': self.uri_for('password.reset.2',
+        pwd_reset_token=pwd_reset_token, user_id=user_id, _full=True),
+    }
+
+    email = mail.EmailMessage(sender=config['email_sender'])
+    email.to = user.email
+    email.body = self.jinja2.render_template(
+      config['templates']['password_reset_text'], **context)
+    email.html = self.jinja2.render_template(
+      config['templates']['password_reset_html'], **context)
+    email.send()
+
+
+class BasePasswordReset2Handler(WebAppBaseHandler):
+  '''Handler to finish password reset process.'''
+  tpl_key = 'password_reset_2'
+
+  def get(self, pwd_reset_token=None):
+    user_id = int(self.request.get('user_id'))
+
+    valid_token = self.auth.store.user_model.validate_pwd_reset_token(
+      user_id, pwd_reset_token)
+    context = {
+      'user_id': user_id,
+      'pwd_reset_url': self.uri_for('password.reset.2',
+        pwd_reset_token=pwd_reset_token, user_id=user_id),
+      'angular_app': self.angular_app,
+      'page_title': self.page_title,
+      'errors': {},
+    }
+    if valid_token:
+      return self.render_response(self._tpl_name, **context)
+    else:
+      self.abort(403, 'Invalid Token.')
+
+  def post(self, pwd_reset_token=None):
+    user_id = int(self.request.get('user_id'))
+
+    valid_token = self.auth.store.user_model.validate_pwd_reset_token(
+      user_id, pwd_reset_token)
+    context = {
+      'user_id': user_id,
+      'pwd_reset_url': self.uri_for('password.reset.2',
+        pwd_reset_token=pwd_reset_token, user_id=user_id),
+      'errors': {},
+      'angular_app': self.angular_app,
+      'page_title': self.page_title,
+    }
+    if valid_token:
+      password = self.request.get('password')
+      confirm = self.request.get('confirm')
 
       if not password:
         # TODO: Localize error messages
@@ -286,12 +446,9 @@ class BaseAccountVerificationHandler(WebAppBaseHandler):
 
       user = self.auth.store.user_model.get_by_id(user_id)
       user.set_password(password)
-      user.confirmed = datetime.datetime.now()
-      user.put()
-      user.delete_signup_token(user_id, signup_token)
-      user = self.auth.store.user_to_dict(user)
-      self.auth.set_session(user)
-      return self.redirect_to('home')
+      user.put_async()
+      user.delete_pwd_reset_token(user_id, pwd_reset_token)
+      return self.redirect_to('login')
     else:
       self.abort(403, 'Invalid Token.')
 
@@ -308,6 +465,7 @@ class BaseLoginHandler(WebAppBaseHandler):
       'page_title': self.page_title,
       'errors': {},
       'login_url': self_url,
+      'signup_url': self.uri_for('signup'),
       'come_back_to': come_back_to,
     }
     return self.render_response(self._tpl_name, **context)
@@ -325,6 +483,7 @@ class BaseLoginHandler(WebAppBaseHandler):
       'errors': {},
       'login_url': self_url,
       'come_back_to': come_back_to,
+      'signup_url': self.uri_for('signup'),
     }
 
     try:

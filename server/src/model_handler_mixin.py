@@ -24,17 +24,15 @@ import webapp2_extras
 from .model import Key
 
 from google.appengine.ext import ndb
+from google.appengine.datastore.datastore_query import Cursor
+from google.appengine.ext.ndb import Property
+from google.appengine.datastore.datastore_query import PropertyOrder
+from google.net.proto.ProtocolBuffer import ProtocolBufferDecodeError
 
 from .utils import *
 
-from google.appengine.ext.ndb import Property
-from google.appengine.datastore.datastore_query import PropertyOrder
-
 
 logger = logging.getLogger(__name__)
-
-
-from google.net.proto.ProtocolBuffer import ProtocolBufferDecodeError
 
 
 class Error(Exception):
@@ -144,9 +142,25 @@ class ModelHandlerMixin(object):
 
     We assume 'key' or 'id' for identify one entity through url param.'''
 
+    def cast_int(value):
+      try:
+        rv = int(value)
+      except (ValueError, TypeError), e:
+        rv = None
+      return rv
+
     @ndb.tasklet
-    def get_entities(qry, limit=None):
-      _entities = yield qry.fetch_async(limit)
+    def get_entities(qry, limit=None, page_size=None, page=None,
+                     start_cursor=None):
+      if not page_size is None:
+        if not page is None:
+          _entities = yield qry.fetch_async(limit,
+                                            offset=(page - 1) * page_size)
+        elif not start_cursor is None:
+          _entities = yield qry.fetch_page_async(page_size,
+                                                 start_cursor=start_cursor)
+      else:
+        _entities = yield qry.fetch_async(limit)
       raise ndb.Return(_entities)
 
     self._pre_get_hook()
@@ -164,13 +178,51 @@ class ModelHandlerMixin(object):
     else:
         # No key or id. We need to return entities by query filters.
         kwargs.update(self.request.params)
+
+        # "p" is a reserved query parameter to retrieve one page of results.
+        page = kwargs.pop('p', None)
+        page = cast_int(page)
+        # "c" is a reserved query parameter to set next cursor for paged
+        # requests.
+        cursor = kwargs.pop('c', None)
+        try:
+          if not cursor is None:
+            cursor = Cursor(urlsafe=cursor)
+        except:
+          cursor = None
+        # "s" is a reserved query parameter to set results page size.
+        page_size = kwargs.pop('s', None)
+        page_size = cast_int(page_size)
+        if (not cursor is None or not page is None) and page_size is None:
+          page_size = 20  # Defaults to 20 results per page
+
         filters = self.build_filters(kwargs)
         order = self.build_order()
         qry = self.create_query(filters, order, kwargs)
         # "l" is a reserved query parameter to limit how many results should be
         # retrieved
         limit = self.limit(kwargs.get('l', None))
-        entities = get_entities(qry, limit).get_result()
+        if not page_size is None:
+          if not page is None:
+            entities = get_entities(qry, limit=limit, page=page).get_result()
+            entities = {
+              'entities': entities,
+              'total_pages': (qry.count() / page_size) + 1,
+              'page_size': page_size,
+              'current_page': page,
+            }
+          elif not cursor is None:
+            entities, cursor, more = get_entities(
+              qry, limit=limit, page_size=page_size,
+              start_cursor=cursor).get_result()
+            entities = {
+              'entities': entities,
+              'total_pages': (qry.count() / page_size) + 1,
+              'page_size': page_size,
+              'cursor': cursor and cursor.urlsafe() or None,
+            }
+        else:
+          entities = get_entities(qry, limit=limit).get_result()
 
     entities = self._post_get_hook(entities)
 

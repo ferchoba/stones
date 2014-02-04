@@ -1,0 +1,9 @@
+name: stones
+author: Carlos León <carlos.eduardo.leon.franco@gmail.com>
+version: 0.4.0
+description: Toolkit to work with Stones Server
+dependencies:
+  angular: any
+  browser: any
+dev_dependencies:
+  unittest: any

@@ -23,6 +23,9 @@ class BaseUser(Webapp2_user, stones.Expando):
   # doesn't use password.
   password = stones.StringProperty()
   type = stones.StringProperty(repeated=True)
+  first_name = stones.StringProperty()
+  last_name = stones.StringProperty()
+  email = stones.StringProperty()
 
   @classmethod
   def get_user_types(cls):
@@ -65,4 +68,18 @@ class BaseUser(Webapp2_user, stones.Expando):
       _uniques += list(unique_properties)
     return super(BaseUser, cls).create_user(auth_id, _uniques, **user_values)
 
+  @classmethod
+  def create_pwd_reset_token(cls, user_id):
+    '''Creates one password reset token.'''
+    entity = cls.token_model.create(user_id, 'pwd_reset')
+    return entity.token
 
+  @classmethod
+  def validate_pwd_reset_token(cls, user_id, token):
+    '''Validates a password reset token.'''
+    return cls.validate_token(user_id, 'pwd_reset', token)
+
+  @classmethod
+  def delete_pwd_reset_token(cls, user_id, token):
+    '''Deletes a password reset token.'''
+    cls.token_model.get_key(user_id, 'pwd_reset', token).delete()

@@ -247,6 +247,8 @@ class OAuth2Service(object):
     self.token = OAuth2Token()
 
   def get_authorization_url(self, **kwargs):
+    if not 'client_id' in kwargs:
+      kwargs['client_id'] = self.client_id
     if not 'response_type' in kwargs:
       kwargs['response_type'] = 'code'
     if not 'scope' in kwargs:
@@ -282,6 +284,7 @@ class OAuth2Service(object):
     }
     if headers:
       _headers.update(headers)
+
     return self.client.request(base_uri, self.token.access_token, method,
                                body, _headers, params, token_param)
 
@@ -292,6 +295,17 @@ class OAuth2Service(object):
 
 class GoogleOAuth2Service(OAuth2Service):
   '''Google OAuth2 specific service'''
+  def __init__(self, client_id, client_secret, redirect_uri, **kwargs):
+    defaults = {
+      'client_id': client_id,
+      'client_secret': client_secret,
+      'redirect_uri': redirect_uri,
+      'request_token_uri': 'https://accounts.google.com/o/oauth2/auth',
+      'access_token_uri': 'https://accounts.google.com/o/oauth2/token',
+    }
+    defaults.update(kwargs)
+    super(GoogleOAuth2Service, self).__init__(**defaults)
+
   def get_user_info(self, token=None):
     if token is None:
       token = self.token
@@ -303,9 +317,17 @@ class GoogleOAuth2Service(OAuth2Service):
 
     if not response.status == 200:
       raise OAuth2ServicesError(content)
-    response_args = OAuth2Client.get_data_from_response(content)
-
-    return response_args
+    person = OAuth2Client.get_data_from_response(content)
+    # TODO: Modify persons keys (extracted from LinkedInOAuth2Service)
+    rv = {
+      'email': person['emailAddress'],
+      'first_name': person['firstName'],
+      'last_name': person['lastName'],
+      'job': person['headline'],
+      'picture_url': person['pictureUrl'],
+      'profile_url': person['publicProfileUrl'],
+    }
+    return rv
 
 
 class FacebookOAuth2Service(OAuth2Service):
@@ -321,9 +343,9 @@ class FacebookOAuth2Service(OAuth2Service):
 
     if not response.status == 200:
         raise OAuth2ServicesError(content)
-    response_args = OAuth2Client.get_data_from_response(content)
+    person = OAuth2Client.get_data_from_response(content)
 
-    return response_args
+    return person
 
 
 class LinkedInOAuth2Service(OAuth2Service):
@@ -339,17 +361,11 @@ class LinkedInOAuth2Service(OAuth2Service):
     defaults.update(kwargs)
     super(LinkedInOAuth2Service, self).__init__(**defaults)
 
-  def get_authorization_url(self, **kwargs):
-    if not 'client_id' in kwargs:
-      kwargs['client_id'] = self.client_id
-    return super(LinkedInOAuth2Service, self).get_authorization_url(**kwargs)
-
   def make_request(self, base_uri, method='GET', headers=None, params=None,
                    body=None, token_param='access_token'):
     _headers = {}
     if headers:
       _headers.update(headers)
-    _params = {}
     return self.client.request(base_uri, self.token.access_token, method,
                                body, _headers, params, token_param)
 
@@ -362,17 +378,23 @@ class LinkedInOAuth2Service(OAuth2Service):
 
     base_uri = 'https://api.linkedin.com/v1/people/'
     params = {'format': 'json'}
-    response, content = self.make_request(base_uri + '~:(email-address)',
-                                          token_param='oauth2_access_token',
-                                          params=params)
+    response, content = self.make_request(
+      base_uri + '~:(email-address,first-name,last-name,headline,picture-url,public-profile-url)',
+      token_param='oauth2_access_token',
+      params=params)
 
     if not response.status == 200:
         raise OAuth2ServicesError(content)
-    response_args = json.loads(content)
-    email = response_args.pop('emailAddress', None)
-    if email:
-      response_args['email'] = email
-    return response_args
+    person = json.loads(content)
+    rv = {
+      'email': person['emailAddress'],
+      'first_name': person['firstName'],
+      'last_name': person['lastName'],
+      'job': person['headline'],
+      'picture_url': person['pictureUrl'],
+      'profile_url': person['publicProfileUrl'],
+    }
+    return rv
 
 
 def get_service(service_name):
